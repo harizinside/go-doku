@@ -1,17 +1,21 @@
-package doku
+package va
 
 import (
 	"context"
 	"encoding/json"
+	doku "github.com/harizinside/go-doku"
 )
 
-// VirtualAccountSnapService exposes the SNAP Virtual Account APIs (BI-SNAP
+// Snap exposes the SNAP Virtual Account APIs (BI-SNAP
 // create-va), one endpoint per bank. Hand-typed from the DOKU Postman
 // collection.
 //
 // Headers sent automatically: X-PARTNER-ID, X-EXTERNAL-ID, X-TIMESTAMP,
 // X-SIGNATURE (HMAC-SHA512 with secretKey), Authorization (B2B), CHANNEL-ID.
-type VirtualAccountSnapService struct{ c *Client }
+type Snap struct{ c *doku.Client }
+
+// NewSnap returns the service bound to c.
+func NewSnap(c *doku.Client) *Snap { return &Snap{c: c} }
 
 const snapChannelID = "H2H"
 
@@ -23,12 +27,12 @@ type SnapMoneyAmount struct {
 	Currency string `json:"currency"`
 }
 
-// SnapVaBillDetail is one bill line.
 type SnapVaBillDetailBillDescription struct {
 	English   *string `json:"english,omitempty"`
 	Indonesia *string `json:"indonesia,omitempty"`
 }
 
+// SnapVaBillDetail is one bill line.
 type SnapVaBillDetail struct {
 	BillCode        string                           `json:"billCode"`
 	BillNo          string                           `json:"billNo"`
@@ -95,61 +99,61 @@ type SnapCreateVaResponse struct {
 	AdditionalInfo      json.RawMessage  `json:"additionalInfo,omitempty"`
 }
 
-func (s *VirtualAccountSnapService) createVa(ctx context.Context, path string, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) createVa(ctx context.Context, path string, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	var out SnapCreateVaResponse
-	if err := s.c.RequestSnap(ctx, "POST", path, SnapOptions{Body: body, ChannelID: snapChannelID}, &out); err != nil {
+	if err := s.c.RequestSnap(ctx, "POST", path, doku.SnapOptions{Body: body, ChannelID: snapChannelID}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // BncCreateVa calls POST /virtual-accounts/bi-snap-va/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) BncCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) BncCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/virtual-accounts/bi-snap-va/v1/transfer-va/create-va", body)
 }
 
 // BniCreateVa calls POST /virtual-accounts/bi-snap-va/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) BniCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) BniCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/virtual-accounts/bi-snap-va/v1/transfer-va/create-va", body)
 }
 
 // BsiCreateVa calls POST /bi-snap-va/bsi/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) BsiCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) BsiCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/bsi/v1/transfer-va/create-va", body)
 }
 
 // BtnCreateVa calls POST /bi-snap-va/btn/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) BtnCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) BtnCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/btn/v1/transfer-va/create-va", body)
 }
 
 // DanamonCreateVa calls POST /bi-snap-va/danamon/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) DanamonCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) DanamonCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/danamon/v1/transfer-va/create-va", body)
 }
 
 // MandiriSnapCreateVa calls POST /bi-snap-va/mandiri/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) MandiriSnapCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) MandiriSnapCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/mandiri/v1/transfer-va/create-va", body)
 }
 
 // MaybankCreateVa calls POST /bi-snap-va/maybank/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) MaybankCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) MaybankCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/maybank/v1/transfer-va/create-va", body)
 }
 
 // PermataSnapCreateVa calls POST /bi-snap-va/permata/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) PermataSnapCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) PermataSnapCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/permata/v1/transfer-va/create-va", body)
 }
 
 // SinarmasCreateVa calls POST /bi-snap-va/sinarmas/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) SinarmasCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) SinarmasCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/sinarmas/v1/transfer-va/create-va", body)
 }
 
 // CimbSnapCreateVa calls POST /bi-snap-va/cimb/v1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) CimbSnapCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) CimbSnapCreateVa(ctx context.Context, body SnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	return s.createVa(ctx, "/bi-snap-va/cimb/v1/transfer-va/create-va", body)
 }
 
@@ -165,7 +169,7 @@ type BriSnapAdditionalInfo struct {
 
 // BriSnapCreateVaRequest is the BRI-specific body.
 type BriSnapCreateVaRequest struct {
-	// 8-char partner service id, e.g. PartnerServiceID("02186") => "   02186"
+	// 8-char partner service id, e.g. doku.PartnerServiceID("02186") => "   02186"
 	PartnerServiceID string `json:"partnerServiceId"`
 	TrxId            string `json:"trxId"`
 	// Customer number appended to the partner service id to form the VA number
@@ -181,9 +185,9 @@ type BriSnapCreateVaRequest struct {
 }
 
 // BriSnapCreateVa calls POST /virtual-accounts/bi-snap-va/v1.1/transfer-va/create-va.
-func (s *VirtualAccountSnapService) BriSnapCreateVa(ctx context.Context, body BriSnapCreateVaRequest) (*SnapCreateVaResponse, error) {
+func (s *Snap) BriSnapCreateVa(ctx context.Context, body BriSnapCreateVaRequest) (*SnapCreateVaResponse, error) {
 	var out SnapCreateVaResponse
-	if err := s.c.RequestSnap(ctx, "POST", "/virtual-accounts/bi-snap-va/v1.1/transfer-va/create-va", SnapOptions{Body: body, ChannelID: snapChannelID}, &out); err != nil {
+	if err := s.c.RequestSnap(ctx, "POST", "/virtual-accounts/bi-snap-va/v1.1/transfer-va/create-va", doku.SnapOptions{Body: body, ChannelID: snapChannelID}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -209,7 +213,6 @@ type SnapCheckStatusRequest struct {
 	AdditionalInfo   json.RawMessage `json:"additionalInfo,omitempty"`
 }
 
-// SnapCheckStatusResponse is the SNAP check-status response.
 type SnapCheckStatusResponseVirtualAccountDataPaymentFlagReason struct {
 	English   *string `json:"english,omitempty"`
 	Indonesia *string `json:"indonesia,omitempty"`
@@ -229,6 +232,7 @@ type SnapCheckStatusResponseAdditionalInfo struct {
 	Acquirer *SnapCheckStatusResponseAdditionalInfoAcquirer `json:"acquirer,omitempty"`
 }
 
+// SnapCheckStatusResponse is the SNAP check-status response.
 type SnapCheckStatusResponse struct {
 	ResponseCode       *string                                    `json:"responseCode,omitempty"`
 	ResponseMessage    *string                                    `json:"responseMessage,omitempty"`
@@ -238,9 +242,9 @@ type SnapCheckStatusResponse struct {
 
 // CheckVaStatus calls POST /orders/v1.0/transfer-va/status.
 // Query at least 60 seconds after payment completion for an accurate status.
-func (s *VirtualAccountSnapService) CheckVaStatus(ctx context.Context, body SnapCheckStatusRequest) (*SnapCheckStatusResponse, error) {
+func (s *Snap) CheckVaStatus(ctx context.Context, body SnapCheckStatusRequest) (*SnapCheckStatusResponse, error) {
 	var out SnapCheckStatusResponse
-	if err := s.c.RequestSnap(ctx, "POST", "/orders/v1.0/transfer-va/status", SnapOptions{Body: body}, &out); err != nil {
+	if err := s.c.RequestSnap(ctx, "POST", "/orders/v1.0/transfer-va/status", doku.SnapOptions{Body: body}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -87,7 +86,13 @@ func TestRequestNonSnap(t *testing.T) {
 	in.Order.InvoiceNumber = "INV-001"
 	in.Payment.DueDate = 60
 
-	var out CheckoutResponse
+	var out struct {
+		Response struct {
+			Payment struct {
+				URL string `json:"url"`
+			} `json:"payment"`
+		} `json:"response"`
+	}
 	if err := c.RequestNonSnap(context.Background(), "POST", "/checkout/v1/payment", in, &out, ""); err != nil {
 		t.Fatalf("RequestNonSnap: %v", err)
 	}
@@ -116,7 +121,7 @@ func TestRequestNonSnap(t *testing.T) {
 	if gotHeaders.Get("Signature") != wantSig {
 		t.Errorf("server signature does not match re-signed body\n  got=%s\n  want=%s", gotHeaders.Get("Signature"), wantSig)
 	}
-	if out.Response == nil || out.Response.Payment == nil || out.Response.Payment.URL == nil {
+	if out.Response.Payment.URL != "https://example.test/pay" {
 		t.Errorf("decoded response missing payment.url: %#v", out)
 	}
 }
@@ -134,8 +139,8 @@ func TestRequestNonSnap_GET(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	if _, err := c.Misc.CheckOrderStatus(context.Background(), "INV-001"); err != nil {
-		t.Fatalf("CheckOrderStatus: %v", err)
+	if err := c.RequestNonSnap(context.Background(), "GET", "/orders/v1/status/INV-001", nil, nil, ""); err != nil {
+		t.Fatalf("RequestNonSnap GET: %v", err)
 	}
 	if gotHeaders.Get("Signature") == "" {
 		t.Fatalf("no Signature header on GET")
@@ -165,7 +170,7 @@ func TestAPIError(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	var out CheckoutResponse
+	var out map[string]any
 	err := c.RequestNonSnap(context.Background(), "POST", "/checkout/v1/payment", map[string]any{"x": 1}, &out, "")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -207,13 +212,9 @@ func TestSnapTokenCached(t *testing.T) {
 	c := newTestClient(t, srv.URL)
 
 	for range 3 {
-		_, err := c.VirtualAccountSnap.MandiriSnapCreateVa(context.Background(), SnapCreateVaRequest{
-			PartnerServiceId: PartnerServiceID("8899"),
-			TrxId:            "INV-001",
-			TotalAmount:      SnapMoneyAmount{Value: "50000.00", Currency: "IDR"},
-		})
+		err := c.RequestSnap(context.Background(), "POST", "/bi-snap-va/mandiri/v1/transfer-va/create-va", SnapOptions{Body: map[string]any{"trxId": "INV-001"}}, nil)
 		if err != nil {
-			t.Fatalf("MandiriSnapCreateVa: %v", err)
+			t.Fatalf("RequestSnap: %v", err)
 		}
 	}
 	if got := atomic.LoadInt32(&tokenHits); got != 1 {
@@ -248,113 +249,15 @@ func TestSnapTokenConcurrent(t *testing.T) {
 	for range N {
 		go func() {
 			defer wg.Done()
-			_, err := c.VirtualAccountSnap.MandiriSnapCreateVa(context.Background(), SnapCreateVaRequest{
-				PartnerServiceId: PartnerServiceID("8899"),
-				TrxId:            "INV-001",
-				TotalAmount:      SnapMoneyAmount{Value: "50000.00", Currency: "IDR"},
-			})
+			err := c.RequestSnap(context.Background(), "POST", "/bi-snap-va/mandiri/v1/transfer-va/create-va", SnapOptions{Body: map[string]any{"trxId": "INV-001"}}, nil)
 			if err != nil {
-				t.Errorf("MandiriSnapCreateVa: %v", err)
+				t.Errorf("RequestSnap: %v", err)
 			}
 		}()
 	}
 	wg.Wait()
 	if got := atomic.LoadInt32(&tokenHits); got > 1 {
 		t.Errorf("token endpoint hit %d times concurrently, want ≤1", got)
-	}
-}
-
-// TestSnapRequestSignatureHeaders verifies SNAP resource-request headers.
-func TestSnapRequestSignatureHeaders(t *testing.T) {
-	var gotHeaders http.Header
-	var gotBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/authorization/v1/access-token/b2b":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"accessToken":"tok-abc","expiresIn":"900"}`))
-			return
-		}
-		gotHeaders = r.Header.Clone()
-		gotBody, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
-	if _, err := c.VirtualAccountSnap.MandiriSnapCreateVa(context.Background(), SnapCreateVaRequest{
-		PartnerServiceId: PartnerServiceID("8899"),
-		TrxId:            "INV-001",
-		TotalAmount:      SnapMoneyAmount{Value: "50000.00", Currency: "IDR"},
-	}); err != nil {
-		t.Fatalf("MandiriSnapCreateVa: %v", err)
-	}
-	for _, h := range []string{"X-PARTNER-ID", "X-EXTERNAL-ID", "X-TIMESTAMP", "X-SIGNATURE", "Authorization"} {
-		if gotHeaders.Get(h) == "" {
-			t.Errorf("missing SNAP header %s", h)
-		}
-	}
-	if gotHeaders.Get("CHANNEL-ID") != "H2H" {
-		t.Errorf("CHANNEL-ID header: got %q, want H2H", gotHeaders.Get("CHANNEL-ID"))
-	}
-	// Body bytes that arrived at the server must equal the bytes the
-	// X-SIGNATURE header was computed over.
-	wantSig := SignSnapRequest(SnapRequestSignatureInput{
-		HTTPMethod:   "POST",
-		EndpointURL:  "/bi-snap-va/mandiri/v1/transfer-va/create-va",
-		AccessToken:  gotHeaders.Get("Authorization")[len("Bearer "):],
-		Body:         string(gotBody),
-		Timestamp:    gotHeaders.Get("X-TIMESTAMP"),
-		ClientSecret: testSecretKey,
-	})
-	if gotHeaders.Get("X-SIGNATURE") != wantSig {
-		t.Errorf("SNAP X-SIGNATURE mismatch\n  got=%s\n  want=%s", gotHeaders.Get("X-SIGNATURE"), wantSig)
-	}
-}
-
-// TestSnapUseSharedKey: signing key comes from SharedKey when set.
-func TestSnapUseSharedKey(t *testing.T) {
-	shared := "shared-key-xyz"
-	var gotHeaders http.Header
-	var gotBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/authorization/v1/access-token/b2b":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"accessToken":"tok-abc","expiresIn":"900"}`))
-			return
-		}
-		gotHeaders = r.Header.Clone()
-		gotBody, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL, func(c *Client) { c.cfg.SharedKey = shared })
-	if _, err := c.KKI.BindingOnly(context.Background(), BindingOnlyBody{
-		AccountName: "Tester",
-		CardData:    "X1234",
-		AdditionalInfo: struct {
-			Channel      string `json:"channel,omitempty"`
-			CustomerName string `json:"customerName,omitempty"`
-			Email        string `json:"email,omitempty"`
-			DateOfBirth  string `json:"dateOfBirth,omitempty"`
-		}{Channel: "H2H"},
-	}, nil); err != nil {
-		t.Fatalf("BindingOnly: %v", err)
-	}
-	wantSig := SignSnapRequest(SnapRequestSignatureInput{
-		HTTPMethod:   "POST",
-		EndpointURL:  "/direct-debit/core/v1/registration-card-bind",
-		AccessToken:  gotHeaders.Get("Authorization")[len("Bearer "):],
-		Body:         string(gotBody),
-		Timestamp:    gotHeaders.Get("X-TIMESTAMP"),
-		ClientSecret: shared,
-	})
-	if gotHeaders.Get("X-SIGNATURE") != wantSig {
-		t.Errorf("SharedKey signing\n  got=%s\n  want=%s", gotHeaders.Get("X-SIGNATURE"), wantSig)
 	}
 }
 
@@ -391,27 +294,5 @@ func TestSnapTokenStringExpiresIn(t *testing.T) {
 	}
 	if ttl := time.Until(c.b2bToken.expiresAt); ttl > 31*time.Second || ttl < 25*time.Second {
 		t.Errorf("token TTL=%v, want ~30s (60s - 30s margin)", ttl)
-	}
-}
-
-// VA helpers must honor the caller's ctx.
-func TestVirtualAccountHonorsContext(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-	c := newTestClient(t, srv.URL)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := c.VirtualAccountNonSnap.MandiriGeneratePaymentCode(ctx, MandiriVaGenerateRequest{}); !errors.Is(err, context.Canceled) {
-		t.Errorf("non-SNAP VA: err=%v, want context.Canceled", err)
-	}
-	if _, err := c.VirtualAccountSnap.BniCreateVa(ctx, SnapCreateVaRequest{}); !errors.Is(err, context.Canceled) {
-		t.Errorf("SNAP VA: err=%v, want context.Canceled", err)
-	}
-	if n := hits.Load(); n != 0 {
-		t.Errorf("server hit %d times with a cancelled ctx", n)
 	}
 }

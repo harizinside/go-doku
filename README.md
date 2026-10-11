@@ -13,17 +13,38 @@ Custom Settlement Report).
 ## Install
 
 ```sh
-go get github.com/harizinside/go-doku
+go get github.com/harizinside/go-doku@v0.2.0
 ```
 
-Pin to a release tag so `go get` never picks up untested WIP from `main`:
-
-```sh
-go get github.com/harizinside/go-doku@v0.1.0
-```
+Pin a release tag so `go get` never picks up untested WIP from `main`.
 
 > **Server-only.** This SDK signs requests with your DOKU secret/private keys.
 > Never load it from an end-user browser.
+
+## Layout
+
+The root package `doku` holds the `Client` (signing, SNAP token cache),
+signing helpers and notification verification. Every product API is its own
+package, bound to a client with `New` (VA has `NewNonSnap` / `NewSnap`):
+
+| Package | Endpoints | API |
+| --- | --- | --- |
+| `checkout` | 1 | DOKU Checkout (hosted payment page) |
+| `creditcard` | 2 | Credit Card payment page + refund |
+| `va` | 14 + 12 | Virtual Accounts: legacy Non-SNAP (7 banks × generate/update) and BI-SNAP (11 banks create-va + check status) |
+| `emoney` | 4 | Legacy OVO (check_sum), SNAP debit h2h, ShopeePay |
+| `settlement` | 7 | Split settlement, hold & release, settlement bank accounts |
+| `misc` | 1 | Check Status API (cross-product) |
+| `directdebitsnap` | 34 | SNAP Direct Debit: OVO, CIMB, Allo, BRI, Mandiri, DANA, ShopeePay |
+| `directdebitlegacy` | 9 | BRI Direct Debit (Non-SNAP) |
+| `kki` | 7 | Kartu Kredit Indonesia |
+| `subaccountv1` / `subaccountv2` | 4 / 16 | Sub Account (Wallet-as-a-Service) |
+| `o2o`, `paylater`, `directtransfer` | 2 / 3 / 1 | Convenience store, Paylater, BCA Direct Transfer |
+
+**Typing tiers.** `checkout`, `creditcard`, `va`, `emoney`, `settlement` and
+`misc` are hand-typed against developers.doku.com. The other packages are
+generated (`*_gen.go`) from the TS sources: request types are inferred from
+DOKU's Postman examples and responses are `json.RawMessage`.
 
 ## Quick start
 
@@ -36,64 +57,60 @@ import (
     "os"
     "time"
 
-    "github.com/harizinside/go-doku"
+    doku "github.com/harizinside/go-doku"
+    "github.com/harizinside/go-doku/checkout"
+    "github.com/harizinside/go-doku/misc"
+    "github.com/harizinside/go-doku/settlement"
+    "github.com/harizinside/go-doku/va"
 )
 
 func main() {
-    privateKey := os.Getenv("DOKU_PRIVATE_KEY") // PKCS#8 PEM (\n escapes in .env are fine)
-
     client := doku.New(doku.Config{
         ClientID:   os.Getenv("DOKU_CLIENT_ID"),
         SecretKey:  os.Getenv("DOKU_SECRET_KEY"),
-        PrivateKey: privateKey, // required only for SNAP APIs
+        PrivateKey: os.Getenv("DOKU_PRIVATE_KEY"), // PKCS#8 PEM, only for SNAP APIs (\n escapes are fine)
         Env:        doku.Sandbox,
     })
-
     ctx := context.Background()
 
     // DOKU Checkout — get a payment page URL
-    checkout, err := client.Checkout.InitiateCheckoutPayment(ctx, doku.CheckoutRequest{
-        Order: doku.CheckoutRequestOrder{
-            Amount:        20000,
-            InvoiceNumber: "INV-0001",
-        },
-        Payment: doku.CheckoutRequestPayment{PaymentDueDate: ptr(60.0)},
+    page, err := checkout.New(client).InitiateCheckoutPayment(ctx, checkout.Request{
+        Order:   checkout.RequestOrder{Amount: 20000, InvoiceNumber: "INV-0001"},
+        Payment: checkout.RequestPayment{PaymentDueDate: doku.Ptr(60.0)},
     })
     if err != nil {
         panic(err)
     }
-    fmt.Println(*checkout.Response.Payment.URL)
+    fmt.Println(*page.Response.Payment.URL)
 
     // Legacy (Non-SNAP) Mandiri VA
-    _, err = client.VirtualAccountNonSnap.MandiriGeneratePaymentCode(ctx, doku.MandiriVaGenerateRequest{
-        Order: doku.VaOrder{InvoiceNumber: "INV-0002", Amount: ptr(50000.0)},
-        VirtualAccountInfo: doku.MandiriVaGenerateRequestVirtualAccountInfo{ReusableStatus: ptr(true), BillingType: ptr("NO_BILL")},
-        Customer: &doku.VaCustomer{Name: ptr("Anton"), Email: ptr("anton@example.com")},
+    _, err = va.NewNonSnap(client).MandiriGeneratePaymentCode(ctx, va.MandiriVaGenerateRequest{
+        Order:              va.Order{InvoiceNumber: "INV-0002", Amount: doku.Ptr(50000.0)},
+        VirtualAccountInfo: va.MandiriVaGenerateRequestVirtualAccountInfo{ReusableStatus: doku.Ptr(true), BillingType: doku.Ptr("NO_BILL")},
+        Customer:           &va.Customer{Name: doku.Ptr("Anton"), Email: doku.Ptr("anton@example.com")},
     })
 
     // SNAP Mandiri VA (B2B token fetch + caching is automatic)
-    _, err = client.VirtualAccountSnap.MandiriSnapCreateVa(ctx, doku.SnapCreateVaRequest{
-        PartnerServiceId:  doku.PartnerServiceID("8899"), // -> "   8899"
-        TrxId:             "INV-0002",
-        TotalAmount:       doku.SnapMoneyAmount{Value: "50000.00", Currency: "IDR"},
-        VirtualAccountName: ptr("Anton"),
-        ExpiredDate:        ptr(time.Now().Add(time.Hour).Format(time.RFC3339)),
-        AdditionalInfo: &doku.SnapVaAdditionalInfo{
-            VirtualAccountConfig: &doku.SnapVaConfig{ReusableStatus: ptr(true)},
+    _, err = va.NewSnap(client).MandiriSnapCreateVa(ctx, va.SnapCreateVaRequest{
+        PartnerServiceId:   doku.PartnerServiceID("8899"), // -> "    8899"
+        TrxId:              "INV-0002",
+        TotalAmount:        va.SnapMoneyAmount{Value: "50000.00", Currency: "IDR"},
+        VirtualAccountName: doku.Ptr("Anton"),
+        ExpiredDate:        doku.Ptr(time.Now().Add(time.Hour).Format(time.RFC3339)),
+        AdditionalInfo: &va.SnapVaAdditionalInfo{
+            VirtualAccountConfig: &va.SnapVaConfig{ReusableStatus: doku.Ptr(true)},
         },
     })
 
     // Check order status
-    _, err = client.Misc.CheckOrderStatus(ctx, "INV-0001")
+    _, err = misc.New(client).CheckOrderStatus(ctx, "INV-0001")
 
     // Release a held settlement
-    _, err = client.Settlement.ReleaseSettlement(ctx, doku.ReleaseSettlementRequest{
-        Order:       doku.ReleaseSettlementRequestOrder{InvoiceNumber: "INV-0001", Amount: 20000},
-        Transaction: doku.ReleaseSettlementRequestTransaction{OriginalRequestID: "the-request-id-from-initiation"},
+    _, err = settlement.New(client).ReleaseSettlement(ctx, settlement.ReleaseSettlementRequest{
+        Order:       settlement.ReleaseSettlementRequestOrder{InvoiceNumber: "INV-0001", Amount: 20000},
+        Transaction: settlement.ReleaseSettlementRequestTransaction{OriginalRequestID: "the-request-id-from-initiation"},
     })
 }
-
-func ptr[T any](v T) *T { return &v }
 ```
 
 ## Credentials & signing
@@ -117,13 +134,13 @@ Both DOKU signing schemes are implemented exactly as documented:
 
 B2B tokens are cached in-memory (mutex-guarded) until shortly before expiry;
 B2B2C tokens are cached per `authCode`. Direct Debit SNAP flows that need a
-customer token accept a `customerToken` option on the call — fetch one with
-`client.SnapB2B2CToken(ctx, authCode)`.
+customer token take a `*SnapOptions{CustomerToken: …}` argument — fetch one
+with `client.SnapB2B2CToken(ctx, authCode)`.
 
 ## Finance & Settlement
 
 - **Hold settlement**: set `AdditionalInfo.HoldSettlement` to `true` on any
-  payment request, then call `client.Settlement.ReleaseSettlement(...)`
+  payment request, then call `settlement.New(client).ReleaseSettlement(...)`
   (optionally with `OverrideSettlement`).
 - **Split settlement**: set `AdditionalInfo.Settlement` (`BankAccountSettlementID`,
   `Value`, `Type: "FIX" | "PERCENTAGE"`) on the payment; manage existing rules
@@ -185,43 +202,19 @@ http.HandleFunc("/api/doku/notifications", func(w http.ResponseWriter, r *http.R
 > A body parser that parses-then-lets-you-re-`json.Marshal` it can reorder keys
 > or change whitespace, breaking verification — read the raw body bytes first.
 
-## API coverage
-
-| Service | Endpoints | Notes |
-| --- | --- | --- |
-| `Checkout` | 1 | Initiate payment, deep-typed from docs |
-| `VirtualAccountNonSnap` | 14 | 7 banks × generate/update, doc-annotated |
-| `VirtualAccountSnap` | 12 | 11 banks create-va + SNAP check status, incl. `PartnerServiceID` helper |
-| `CreditCard` | 2 | Payment page + refund |
-| `Emoney` | 4 | Legacy OVO (check_sum), SNAP debit h2h, ShopeePay |
-| `O2O`, `Paylater`, `DirectTransfer` | 6 | Generated |
-| `DirectDebitLegacy` | 9 | BRI Direct Debit v1 |
-| `DirectDebitSnap` | 34 | OVO/CIMB/ALLO/BRI/Mandiri/Dana/ShopeePay |
-| `KKI` | 7 | Kartu Kredit Indonesia |
-| `SubAccountV1` / `SubAccountV2` | 4 / 16 | Wallet-as-a-Service |
-| `Misc` | 1 | Check Status API (Non-SNAP, cross-product) |
-| `Settlement` | 7 | Split check-status/edit/cancel, release, bulk bank account create/update/get (hand-typed from docs) |
-
-**Typing tiers.** Checkout, Credit Card, both VA families, Check Status and
-all of `Settlement` are hand-typed against developers.doku.com. The remaining
-generated modules have request interfaces inferred from the Postman collection's
-example bodies (leaf fields optional, marked `TODO: verify against
-developers.doku.com`) and return `json.RawMessage` — narrow as needed.
-
 ## Development
 
 ```sh
-go test ./...          # go:test (signature + client behavior, no network)
 go vet ./...
+go test ./...   # no network: signatures, client behavior, per-package request checks
 ```
 
-The 8 generated modules are produced from
-`scripts/ts2go.mjs` reading `../doku/src/products/*.ts`:
+The generated packages (`*_gen.go`) come from `scripts/ts2go.mjs`, which reads
+`../doku/src/products/*.ts` with the TypeScript compiler installed in that repo:
 
 ```sh
-cd scripts && npm install typescript   # one-time
-cd ..
-node scripts/ts2go.mjs ../doku        # writes zz_<module>_gen.go
+(cd ../doku && npm install)   # one-time
+node scripts/ts2go.mjs ../doku
 gofmt -w .
 ```
 
@@ -232,8 +225,8 @@ gofmt -w .
   this SDK follows the collection.
 - The split-settlement host is unconfirmed (see above); a `FinanceBaseURL`
   override exists.
-- Generated modules carry `TODO: verify` markers — tighten endpoint-by-endpoint
-  as you use them.
+- Generated packages are inferred from examples — tighten types
+  endpoint-by-endpoint as you use them.
 
 ## License
 

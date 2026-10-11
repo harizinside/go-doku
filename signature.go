@@ -1,7 +1,6 @@
-// Package doku implements the DOKU Payment Gateway SDK.
-//
-// signature.go: Non-SNAP and SNAP signing primitives. Every function mirrors
-// its counterpart in @harizinside/doku (src/core/signature.ts) byte-for-byte.
+// Non-SNAP and SNAP signing primitives. Every function mirrors its
+// counterpart in @harizinside/doku (src/core/signature.ts) byte-for-byte.
+
 package doku
 
 import (

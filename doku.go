@@ -1,3 +1,12 @@
+// Package doku is a zero-dependency Go SDK for the DOKU Payment Gateway, a
+// port of the @harizinside/doku Node package.
+//
+// This package holds the Client (Non-SNAP and SNAP request signing, SNAP
+// token caching), the signing primitives and notification verification.
+// Each product API lives in its own subpackage, bound to a Client:
+//
+//	c := doku.New(doku.Config{ClientID: id, SecretKey: sk, PrivateKey: pem})
+//	res, err := checkout.New(c).InitiateCheckoutPayment(ctx, checkout.Request{...})
 package doku
 
 import (
@@ -83,9 +92,8 @@ const (
 	maxTokenTTL        = time.Hour
 )
 
-// Client is the DOKU SDK entry point. Service fields hang off this struct
-// (`client.Checkout`, `client.Settlement`, …) — Go equivalent of TS's
-// `bindModule` helper.
+// Client signs and sends DOKU requests. Product APIs live in subpackages
+// (checkout, va, kki, …), each built with `<pkg>.New(client)`.
 type Client struct {
 	cfg config
 
@@ -94,22 +102,6 @@ type Client struct {
 	tokenMu     sync.Mutex
 	b2bToken    *cachedToken
 	b2b2cTokens map[string]*cachedToken
-
-	Checkout              *CheckoutService
-	CreditCard            *CreditCardService
-	VirtualAccountNonSnap *VirtualAccountNonSnapService
-	VirtualAccountSnap    *VirtualAccountSnapService
-	Emoney                *EmoneyService
-	O2O                   *O2oService
-	Paylater              *PaylaterService
-	DirectTransfer        *DirectTransferService
-	DirectDebitLegacy     *DirectDebitLegacyService
-	DirectDebitSnap       *DirectDebitSnapService
-	KKI                   *KkiService
-	SubAccountV1          *SubAccountV1Service
-	SubAccountV2          *SubAccountV2Service
-	Misc                  *MiscService
-	Settlement            *SettlementService
 }
 
 type config struct {
@@ -123,7 +115,7 @@ type config struct {
 	HTTPClient     *http.Client
 }
 
-// New returns a wired-up DokuClient with every product namespace attached.
+// New returns a Client for cfg.
 func New(cfg Config) *Client {
 	env := cfg.Env
 	if env == "" {
@@ -156,37 +148,27 @@ func New(cfg Config) *Client {
 		b2b2cTokens: map[string]*cachedToken{},
 	}
 
-	c.Checkout = &CheckoutService{c: c}
-	c.CreditCard = &CreditCardService{c: c}
-	c.VirtualAccountNonSnap = &VirtualAccountNonSnapService{c: c}
-	c.VirtualAccountSnap = &VirtualAccountSnapService{c: c}
-	c.Emoney = &EmoneyService{c: c}
-	c.O2O = &O2oService{c: c}
-	c.Paylater = &PaylaterService{c: c}
-	c.DirectTransfer = &DirectTransferService{c: c}
-	c.DirectDebitLegacy = &DirectDebitLegacyService{c: c}
-	c.DirectDebitSnap = &DirectDebitSnapService{c: c}
-	c.KKI = &KkiService{c: c}
-	c.SubAccountV1 = &SubAccountV1Service{c: c}
-	c.SubAccountV2 = &SubAccountV2Service{c: c}
-	c.Misc = &MiscService{c: c}
-	c.Settlement = &SettlementService{c: c}
 	return c
 }
 
-// baseURL strips any trailing slash. Used for financeBaseURL fallback.
-func (c *Client) baseURLTrimmed() string {
-	return strings.TrimRight(c.cfg.BaseURL, "/")
-}
+// ClientID returns the configured DOKU client id.
+func (c *Client) ClientID() string { return c.cfg.ClientID }
 
-// financeAPIBase is the base for finance settlement requests. Falls back to the
-// main API host when FinanceBaseURL isn't set.
-func (c *Client) financeAPIBase() string {
+// SecretKey returns the configured secret key (needed by product packages
+// that sign request bodies themselves, e.g. the legacy OVO check_sum).
+func (c *Client) SecretKey() string { return c.cfg.SecretKey }
+
+// FinanceBaseURL is the base for Finance/Settlement requests: Config.FinanceBaseURL,
+// or the main API host when unset.
+func (c *Client) FinanceBaseURL() string {
 	if c.cfg.FinanceBaseURL != "" {
 		return c.cfg.FinanceBaseURL
 	}
-	return c.baseURLTrimmed()
+	return strings.TrimRight(c.cfg.BaseURL, "/")
 }
+
+// Ptr returns a pointer to v, for optional request fields.
+func Ptr[T any](v T) *T { return &v }
 
 // encodeBody marshals body the way Node's `JSON.stringify(body, null, 2)`
 // does: 2-space indent, no HTML escaping, no trailing newline. The returned

@@ -1,19 +1,25 @@
-package doku
+// Package settlement is the DOKU Finance & Settlement API: split settlement,
+// hold & release, and settlement bank accounts.
+package settlement
 
 import (
 	"context"
 	"fmt"
+	doku "github.com/harizinside/go-doku"
 	"net/url"
 )
 
-// SettlementService exposes the Finance & Settlement APIs (Split Settlement,
+// Service exposes the Finance & Settlement APIs (Split Settlement,
 // Hold & Release, Bulk Bank Registration). Host-typed by
 // developers.doku.com.
-type SettlementService struct{ c *Client }
+type Service struct{ c *doku.Client }
 
-// SettlementSplit is one Split Settlement rule.
+// New returns the service bound to c.
+func New(c *doku.Client) *Service { return &Service{c: c} }
+
+// Split is one Split Settlement rule.
 // Split is calculated on the *net* settlement amount (order amount minus fees).
-type SettlementSplit struct {
+type Split struct {
 	// Bank Settlement ID retrieved from the DOKU Back Office (e.g. SBS-1004-...)
 	BankAccountSettlementID string `json:"bank_account_settlement_id"`
 	// Exact IDR amount when Type is FIX, or the percentage when PERCENTAGE
@@ -21,26 +27,26 @@ type SettlementSplit struct {
 	Type  string `json:"type"`  // "FIX" | "PERCENTAGE"
 }
 
-// SettlementReportEntry is one Custom Settlement Report column.
-type SettlementReportEntry struct {
+// ReportEntry is one Custom Settlement Report column.
+type ReportEntry struct {
 	// Column name in the settlement report export. Max length: 64
 	Key string `json:"key"`
 	// Column value for the transaction. Max length: 128
 	Value string `json:"value"`
 }
 
-// SettlementAdditionalInfo is the generic Direct-API `additional_info`
+// AdditionalInfo is the generic Direct-API `additional_info`
 // extension for settlement features. Documented for Checkout but valid
 // wherever `additional_info` is accepted.
-type SettlementAdditionalInfo struct {
+type AdditionalInfo struct {
 	// Hold & Release: defer the payout for this payment until released via
 	// ReleaseSettlement
 	HoldSettlement *bool `json:"hold_settlement,omitempty"`
 	// Split Settlement: route the net settlement amount to one or more sub
 	// bank accounts
-	Settlement []SettlementSplit `json:"settlement,omitempty"`
+	Settlement []Split `json:"settlement,omitempty"`
 	// Custom Settlement Report: extra columns in the settlement report export
-	Report []SettlementReportEntry `json:"report,omitempty"`
+	Report []ReportEntry `json:"report,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +76,7 @@ type SplitSettlementCheckStatusItem struct {
 type SplitSettlementEditRequest struct {
 	SplitSettlementQuery
 	// At least 1 entry; empty arrays are rejected by DOKU
-	SplitTransactionBankAccount []SettlementSplit `json:"split_transaction_bank_account"`
+	SplitTransactionBankAccount []Split `json:"split_transaction_bank_account"`
 }
 
 // SplitSettlementCancelResponse is the cancel response.
@@ -81,35 +87,28 @@ type SplitSettlementCancelResponse struct {
 	Amount          *float64 `json:"amount,omitempty"`
 }
 
-func (s *SettlementService) financeBase() string {
-	if s.c.cfg.FinanceBaseURL != "" {
-		return s.c.cfg.FinanceBaseURL
-	}
-	return s.c.baseURLTrimmed()
-}
-
 // SplitSettlementCheckStatus calls POST /v1/split-settlement/check-status.
-func (s *SettlementService) SplitSettlementCheckStatus(ctx context.Context, body SplitSettlementQuery) ([]SplitSettlementCheckStatusItem, error) {
+func (s *Service) SplitSettlementCheckStatus(ctx context.Context, body SplitSettlementQuery) ([]SplitSettlementCheckStatusItem, error) {
 	var out []SplitSettlementCheckStatusItem
-	if err := s.c.RequestNonSnap(ctx, "POST", "/v1/split-settlement/check-status", body, &out, s.financeBase()); err != nil {
+	if err := s.c.RequestNonSnap(ctx, "POST", "/v1/split-settlement/check-status", body, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
 // SplitSettlementEdit calls POST /v1/split-settlement/edit.
-func (s *SettlementService) SplitSettlementEdit(ctx context.Context, body SplitSettlementEditRequest) ([]SplitSettlementCheckStatusItem, error) {
+func (s *Service) SplitSettlementEdit(ctx context.Context, body SplitSettlementEditRequest) ([]SplitSettlementCheckStatusItem, error) {
 	var out []SplitSettlementCheckStatusItem
-	if err := s.c.RequestNonSnap(ctx, "POST", "/v1/split-settlement/edit", body, &out, s.financeBase()); err != nil {
+	if err := s.c.RequestNonSnap(ctx, "POST", "/v1/split-settlement/edit", body, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
 // SplitSettlementCancel calls POST /v1/split-settlement/cancel.
-func (s *SettlementService) SplitSettlementCancel(ctx context.Context, body SplitSettlementQuery) (*SplitSettlementCancelResponse, error) {
+func (s *Service) SplitSettlementCancel(ctx context.Context, body SplitSettlementQuery) (*SplitSettlementCancelResponse, error) {
 	var out SplitSettlementCancelResponse
-	if err := s.c.RequestNonSnap(ctx, "POST", "/v1/split-settlement/cancel", body, &out, s.financeBase()); err != nil {
+	if err := s.c.RequestNonSnap(ctx, "POST", "/v1/split-settlement/cancel", body, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -124,7 +123,7 @@ type ReleaseSettlementRequest struct {
 	Order       ReleaseSettlementRequestOrder       `json:"order"`
 	Transaction ReleaseSettlementRequestTransaction `json:"transaction"`
 	// Override the split settlement rule at release time
-	OverrideSettlement []SettlementSplit `json:"override_settlement,omitempty"`
+	OverrideSettlement []Split `json:"override_settlement,omitempty"`
 }
 
 // ReleaseSettlementRequestOrder echoes the original payment's order.
@@ -167,9 +166,9 @@ type ReleaseSettlementResponseTransaction struct {
 }
 
 // ReleaseSettlement calls POST /finance/v1/release on the finance host.
-func (s *SettlementService) ReleaseSettlement(ctx context.Context, body ReleaseSettlementRequest) (*ReleaseSettlementResponse, error) {
+func (s *Service) ReleaseSettlement(ctx context.Context, body ReleaseSettlementRequest) (*ReleaseSettlementResponse, error) {
 	var out ReleaseSettlementResponse
-	if err := s.c.RequestNonSnap(ctx, "POST", "/finance/v1/release", body, &out, s.financeBase()); err != nil {
+	if err := s.c.RequestNonSnap(ctx, "POST", "/finance/v1/release", body, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -179,8 +178,8 @@ func (s *SettlementService) ReleaseSettlement(ctx context.Context, body ReleaseS
 // Bulk Registration Bank (host-to-host, Non-SNAP signing)
 // ---------------------------------------------------------------------------
 
-// SettlementBankAccount is one bank account record.
-type SettlementBankAccount struct {
+// BankAccount is one bank account record.
+type BankAccount struct {
 	// Bank transfer code
 	Code string `json:"code"`
 	// Account number, numeric only
@@ -195,59 +194,59 @@ type SettlementBankAccount struct {
 
 // CreateSettlementBankAccountRequest is the body for create.
 type CreateSettlementBankAccountRequest struct {
-	BankAccount SettlementBankAccount `json:"bank_account"`
+	BankAccount BankAccount `json:"bank_account"`
 }
 
-// UpdateSettlementBankAccountRequest is the body for update. The
-// SettlementID identifies the existing "VERIFIED" account.
 type UpdateSettlementBankAccountRequestBankAccount struct {
-	SettlementBankAccount
+	BankAccount
 	// Bank Settlement ID of the account being updated (must already be "VERIFIED")
 	BankAccountSettlementID string `json:"bank_account_settlement_id"`
 }
 
+// UpdateSettlementBankAccountRequest is the body for update. The
+// SettlementID identifies the existing "VERIFIED" account.
 type UpdateSettlementBankAccountRequest struct {
 	BankAccount UpdateSettlementBankAccountRequestBankAccount `json:"bank_account"`
 }
 
-// SettlementBankAccountResponse is the response from bulk-bank-account calls.
-type SettlementBankAccountResponseBankAccount struct {
-	SettlementBankAccount
+type BankAccountResponseBankAccount struct {
+	BankAccount
 	// "VERIFIED" | "UNVERIFIED" | other
 	Status                  *string `json:"status,omitempty"`
 	BankAccountSettlementID *string `json:"bank_account_settlement_id,omitempty"`
 }
 
-type SettlementBankAccountResponse struct {
-	BankAccount *SettlementBankAccountResponseBankAccount `json:"bank_account,omitempty"`
+// BankAccountResponse is the response from bulk-bank-account calls.
+type BankAccountResponse struct {
+	BankAccount *BankAccountResponseBankAccount `json:"bank_account,omitempty"`
 }
 
 // CreateSettlementBankAccount calls POST /v2/settlement-bank-account.
-func (s *SettlementService) CreateSettlementBankAccount(ctx context.Context, body CreateSettlementBankAccountRequest) (*SettlementBankAccountResponse, error) {
-	var out SettlementBankAccountResponse
-	if err := s.c.RequestNonSnap(ctx, "POST", "/v2/settlement-bank-account", body, &out, s.financeBase()); err != nil {
+func (s *Service) CreateSettlementBankAccount(ctx context.Context, body CreateSettlementBankAccountRequest) (*BankAccountResponse, error) {
+	var out BankAccountResponse
+	if err := s.c.RequestNonSnap(ctx, "POST", "/v2/settlement-bank-account", body, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // UpdateSettlementBankAccount calls PUT /v2/settlement-bank-account.
-func (s *SettlementService) UpdateSettlementBankAccount(ctx context.Context, body UpdateSettlementBankAccountRequest) (*SettlementBankAccountResponse, error) {
-	var out SettlementBankAccountResponse
-	if err := s.c.RequestNonSnap(ctx, "PUT", "/v2/settlement-bank-account", body, &out, s.financeBase()); err != nil {
+func (s *Service) UpdateSettlementBankAccount(ctx context.Context, body UpdateSettlementBankAccountRequest) (*BankAccountResponse, error) {
+	var out BankAccountResponse
+	if err := s.c.RequestNonSnap(ctx, "PUT", "/v2/settlement-bank-account", body, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // GetSettlementBankAccount calls GET /v2/settlement-bank-account/{bankCode}/{accountNumber}.
-func (s *SettlementService) GetSettlementBankAccount(ctx context.Context, bankCode, accountNumber string) (*SettlementBankAccountResponse, error) {
+func (s *Service) GetSettlementBankAccount(ctx context.Context, bankCode, accountNumber string) (*BankAccountResponse, error) {
 	if bankCode == "" || accountNumber == "" {
 		return nil, fmt.Errorf("doku: bankCode and accountNumber are required")
 	}
 	path := fmt.Sprintf("/v2/settlement-bank-account/%s/%s", url.PathEscape(bankCode), url.PathEscape(accountNumber))
-	var out SettlementBankAccountResponse
-	if err := s.c.RequestNonSnap(ctx, "GET", path, nil, &out, s.financeBase()); err != nil {
+	var out BankAccountResponse
+	if err := s.c.RequestNonSnap(ctx, "GET", path, nil, &out, s.c.FinanceBaseURL()); err != nil {
 		return nil, err
 	}
 	return &out, nil

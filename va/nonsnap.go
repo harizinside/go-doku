@@ -1,25 +1,32 @@
-package doku
+// Package va is the DOKU Virtual Account API: legacy Non-SNAP payment codes
+// (NewNonSnap) and BI-SNAP create-va / check-status (NewSnap).
+package va
 
 import (
 	"context"
 	"encoding/json"
+	doku "github.com/harizinside/go-doku"
+	"github.com/harizinside/go-doku/settlement"
 )
 
-// VirtualAccountNonSnapService exposes the legacy Non-SNAP Virtual Account
+// NonSnap exposes the legacy Non-SNAP Virtual Account
 // APIs (v2 payment-code), one pair of generate/update endpoints per bank.
 // Hand-typed from the DOKU Postman collection.
-type VirtualAccountNonSnapService struct{ c *Client }
+type NonSnap struct{ c *doku.Client }
 
-// VaOrder is the shared VA order block.
-type VaOrder struct {
+// NewNonSnap returns the service bound to c.
+func NewNonSnap(c *doku.Client) *NonSnap { return &NonSnap{c: c} }
+
+// Order is the shared VA order block.
+type Order struct {
 	// Merchant invoice number that identifies the order. Max length: 64
 	InvoiceNumber string `json:"invoice_number"`
 	// Payment amount. Optional for open-amount VAs (e.g. Mandiri NO_BILL)
 	Amount *float64 `json:"amount,omitempty"`
 }
 
-// VaCustomer is the shared VA customer block.
-type VaCustomer struct {
+// Customer is the shared VA customer block.
+type Customer struct {
 	// Customer name shown on the payment page/statement
 	Name *string `json:"name,omitempty"`
 	// Customer email
@@ -29,22 +36,21 @@ type VaCustomer struct {
 	Country *string `json:"country,omitempty"`
 }
 
-// VaInfoBase is the shared virtual_account_info fields across banks.
-type VaInfoBase struct {
+// InfoBase is the shared virtual_account_info fields across banks.
+type InfoBase struct {
 	// VA expiry in minutes
 	ExpiredTime *float64 `json:"expired_time,omitempty"`
 	// true: VA can be paid multiple times
 	ReusableStatus *bool `json:"reusable_status,omitempty"`
 }
 
-// VaPaymentCodeResponse is the shared response shape for VA generate/update.
-type VaPaymentCodeResponseOrder struct {
+type PaymentCodeResponseOrder struct {
 	InvoiceNumber *string         `json:"invoice_number,omitempty"`
 	Amount        json.RawMessage `json:"amount,omitempty"`
 	Currency      *string         `json:"currency,omitempty"`
 }
 
-type VaPaymentCodeResponseVirtualAccountInfo struct {
+type PaymentCodeResponseVirtualAccountInfo struct {
 	VirtualAccountNumber *string         `json:"virtual_account_number,omitempty"`
 	CreatedDate          *string         `json:"created_date,omitempty"`
 	ExpiredDate          *string         `json:"expired_date,omitempty"`
@@ -52,82 +58,83 @@ type VaPaymentCodeResponseVirtualAccountInfo struct {
 	BillingType          *string         `json:"billing_type,omitempty"`
 }
 
-type VaPaymentCodeResponse struct {
-	Order              *VaPaymentCodeResponseOrder              `json:"order,omitempty"`
-	Customer           *VaCustomer                              `json:"customer,omitempty"`
-	VirtualAccountInfo *VaPaymentCodeResponseVirtualAccountInfo `json:"virtual_account_info,omitempty"`
-	AdditionalInfo     json.RawMessage                          `json:"additional_info,omitempty"`
+// PaymentCodeResponse is the shared response shape for VA generate/update.
+type PaymentCodeResponse struct {
+	Order              *PaymentCodeResponseOrder              `json:"order,omitempty"`
+	Customer           *Customer                              `json:"customer,omitempty"`
+	VirtualAccountInfo *PaymentCodeResponseVirtualAccountInfo `json:"virtual_account_info,omitempty"`
+	AdditionalInfo     json.RawMessage                        `json:"additional_info,omitempty"`
 }
 
-func (s *VirtualAccountNonSnapService) generate(ctx context.Context, path string, body any) (*VaPaymentCodeResponse, error) {
-	var out VaPaymentCodeResponse
+func (s *NonSnap) generate(ctx context.Context, path string, body any) (*PaymentCodeResponse, error) {
+	var out PaymentCodeResponse
 	if err := s.c.RequestNonSnap(ctx, "POST", path, body, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *VirtualAccountNonSnapService) update(ctx context.Context, path string, body any) (*VaPaymentCodeResponse, error) {
-	var out VaPaymentCodeResponse
+func (s *NonSnap) update(ctx context.Context, path string, body any) (*PaymentCodeResponse, error) {
+	var out PaymentCodeResponse
 	if err := s.c.RequestNonSnap(ctx, "PATCH", path, body, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// VaMandiriAdditionalInfo combines SettlementAdditionalInfo with Mandiri's
-// account.id sub-account routing.
-type VaMandiriAdditionalInfoAccount struct {
+type MandiriAdditionalInfoAccount struct {
 	// Sub Account id, e.g. SAC-2832-...
 	ID *string `json:"id,omitempty"`
 }
 
-type VaMandiriAdditionalInfo struct {
-	*SettlementAdditionalInfo
-	Account *VaMandiriAdditionalInfoAccount `json:"account,omitempty"`
+// MandiriAdditionalInfo combines settlement.AdditionalInfo with Mandiri's
+// account.id sub-account routing.
+type MandiriAdditionalInfo struct {
+	*settlement.AdditionalInfo
+	Account *MandiriAdditionalInfoAccount `json:"account,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
 // Mandiri VA — /mandiri-virtual-account/v2/payment-code
 // ---------------------------------------------------------------------------
 
-// MandiriVaGenerateRequest is the body for POST /mandiri-virtual-account/v2/payment-code.
 type MandiriVaGenerateRequestVirtualAccountInfo struct {
 	// Mandiri-specific billing type, e.g. "NO_BILL"
 	BillingType    *string `json:"billing_type,omitempty"`
 	ReusableStatus *bool   `json:"reusable_status,omitempty"`
 }
 
+// MandiriVaGenerateRequest is the body for POST /mandiri-virtual-account/v2/payment-code.
 type MandiriVaGenerateRequest struct {
-	Order              VaOrder                                    `json:"order"`
+	Order              Order                                      `json:"order"`
 	VirtualAccountInfo MandiriVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                                `json:"customer,omitempty"`
+	Customer           *Customer                                  `json:"customer,omitempty"`
 	// Route settlement to a Sub Account (wallet)
-	AdditionalInfo *VaMandiriAdditionalInfo `json:"additional_info,omitempty"`
+	AdditionalInfo *MandiriAdditionalInfo `json:"additional_info,omitempty"`
 }
 
-// MandiriVaUpdateRequest is the body for PATCH /mandiri-virtual-account/v2/payment-code.
 type MandiriVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	// VA number previously generated for this invoice
 	VirtualAccountNumber *string `json:"virtual_account_number,omitempty"`
 	BillingType          *string `json:"billing_type,omitempty"`
 }
 
+// MandiriVaUpdateRequest is the body for PATCH /mandiri-virtual-account/v2/payment-code.
 type MandiriVaUpdateRequest struct {
-	Order              VaOrder                                  `json:"order"`
+	Order              Order                                    `json:"order"`
 	VirtualAccountInfo MandiriVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                              `json:"customer,omitempty"`
-	AdditionalInfo     *VaMandiriAdditionalInfo                 `json:"additional_info,omitempty"`
+	Customer           *Customer                                `json:"customer,omitempty"`
+	AdditionalInfo     *MandiriAdditionalInfo                   `json:"additional_info,omitempty"`
 }
 
 // MandiriGeneratePaymentCode calls POST /mandiri-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) MandiriGeneratePaymentCode(ctx context.Context, body MandiriVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) MandiriGeneratePaymentCode(ctx context.Context, body MandiriVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/mandiri-virtual-account/v2/payment-code", body)
 }
 
 // MandiriUpdatePaymentCode calls PATCH /mandiri-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) MandiriUpdatePaymentCode(ctx context.Context, body MandiriVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) MandiriUpdatePaymentCode(ctx context.Context, body MandiriVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/mandiri-virtual-account/v2/payment-code", body)
 }
 
@@ -135,24 +142,23 @@ func (s *VirtualAccountNonSnapService) MandiriUpdatePaymentCode(ctx context.Cont
 // BCA VA — /bca-virtual-account/v2/payment-code (MGPC: merchant provides the number)
 // ---------------------------------------------------------------------------
 
-// BcaVaGenerateRequest is the body for POST /bca-virtual-account/v2/payment-code.
 type BcaVaGenerateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	// Full BCA VA number (company code + digits)
 	VirtualAccountNumber *string `json:"virtual_account_number,omitempty"`
 	// e.g. "NO_BILL"
 	BillingType *string `json:"billing_type,omitempty"`
 }
 
+// BcaVaGenerateRequest is the body for POST /bca-virtual-account/v2/payment-code.
 type BcaVaGenerateRequest struct {
-	Order              VaOrder                                `json:"order"`
+	Order              Order                                  `json:"order"`
 	VirtualAccountInfo BcaVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                            `json:"customer,omitempty"`
+	Customer           *Customer                              `json:"customer,omitempty"`
 }
 
-// BcaVaUpdateRequest is the body for PATCH /bca-virtual-account/v2/payment-code.
 type BcaVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	VirtualAccountNumber string `json:"virtual_account_number"`
 	// Free-text info lines printed on the BCA statement
 	Info1 *string `json:"info1,omitempty"`
@@ -160,10 +166,11 @@ type BcaVaUpdateRequestVirtualAccountInfo struct {
 	Info3 *string `json:"info3,omitempty"`
 }
 
+// BcaVaUpdateRequest is the body for PATCH /bca-virtual-account/v2/payment-code.
 type BcaVaUpdateRequest struct {
-	Order              VaOrder                              `json:"order"`
+	Order              Order                                `json:"order"`
 	VirtualAccountInfo BcaVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                          `json:"customer,omitempty"`
+	Customer           *Customer                            `json:"customer,omitempty"`
 }
 
 // BcaGeneratePaymentCode calls POST /bca-virtual-account/v2/payment-code.
@@ -173,12 +180,12 @@ type BcaVaUpdateRequest struct {
 // corresponding BRI folder anywhere else in the collection). Verified against
 // DOKU's official docs (jokul.doku.com) that /bca-virtual-account/v2/payment-code
 // is correct here.
-func (s *VirtualAccountNonSnapService) BcaGeneratePaymentCode(ctx context.Context, body BcaVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) BcaGeneratePaymentCode(ctx context.Context, body BcaVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/bca-virtual-account/v2/payment-code", body)
 }
 
 // BcaUpdatePaymentCode calls PATCH /bca-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) BcaUpdatePaymentCode(ctx context.Context, body BcaVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) BcaUpdatePaymentCode(ctx context.Context, body BcaVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/bca-virtual-account/v2/payment-code", body)
 }
 
@@ -186,42 +193,42 @@ func (s *VirtualAccountNonSnapService) BcaUpdatePaymentCode(ctx context.Context,
 // BSI VA — /bsm-virtual-account/v2/payment-code
 // ---------------------------------------------------------------------------
 
-// BsiVaGenerateRequest is the body for POST /bsm-virtual-account/v2/payment-code.
 type BsiVaGenerateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	Info1 *string `json:"info1,omitempty"`
 	Info2 *string `json:"info2,omitempty"`
 	Info3 *string `json:"info3,omitempty"`
 }
 
+// BsiVaGenerateRequest is the body for POST /bsm-virtual-account/v2/payment-code.
 type BsiVaGenerateRequest struct {
-	Order              VaOrder                                `json:"order"`
+	Order              Order                                  `json:"order"`
 	VirtualAccountInfo BsiVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                            `json:"customer,omitempty"`
+	Customer           *Customer                              `json:"customer,omitempty"`
 }
 
-// BsiVaUpdateRequest extends the generate request with the existing VA number.
 type BsiVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	VirtualAccountNumber string  `json:"virtual_account_number"`
 	Info1                *string `json:"info1,omitempty"`
 	Info2                *string `json:"info2,omitempty"`
 	Info3                *string `json:"info3,omitempty"`
 }
 
+// BsiVaUpdateRequest extends the generate request with the existing VA number.
 type BsiVaUpdateRequest struct {
-	Order              VaOrder                              `json:"order"`
+	Order              Order                                `json:"order"`
 	VirtualAccountInfo BsiVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                          `json:"customer,omitempty"`
+	Customer           *Customer                            `json:"customer,omitempty"`
 }
 
 // BsiGeneratePaymentCode calls POST /bsm-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) BsiGeneratePaymentCode(ctx context.Context, body BsiVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) BsiGeneratePaymentCode(ctx context.Context, body BsiVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/bsm-virtual-account/v2/payment-code", body)
 }
 
 // BsiUpdatePaymentCode calls PATCH /bsm-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) BsiUpdatePaymentCode(ctx context.Context, body BsiVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) BsiUpdatePaymentCode(ctx context.Context, body BsiVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/bsm-virtual-account/v2/payment-code", body)
 }
 
@@ -229,42 +236,42 @@ func (s *VirtualAccountNonSnapService) BsiUpdatePaymentCode(ctx context.Context,
 // DOKU VA — /doku-virtual-account/v2/payment-code
 // ---------------------------------------------------------------------------
 
-// DokuVaGenerateRequest is the body for POST /doku-virtual-account/v2/payment-code.
 type DokuVaGenerateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	Info1 *string `json:"info1,omitempty"`
 	Info2 *string `json:"info2,omitempty"`
 	Info3 *string `json:"info3,omitempty"`
 }
 
+// DokuVaGenerateRequest is the body for POST /doku-virtual-account/v2/payment-code.
 type DokuVaGenerateRequest struct {
-	Order              VaOrder                                 `json:"order"`
+	Order              Order                                   `json:"order"`
 	VirtualAccountInfo DokuVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                             `json:"customer,omitempty"`
+	Customer           *Customer                               `json:"customer,omitempty"`
 }
 
-// DokuVaUpdateRequest extends the generate request with the existing VA number.
 type DokuVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	VirtualAccountNumber string  `json:"virtual_account_number"`
 	Info1                *string `json:"info1,omitempty"`
 	Info2                *string `json:"info2,omitempty"`
 	Info3                *string `json:"info3,omitempty"`
 }
 
+// DokuVaUpdateRequest extends the generate request with the existing VA number.
 type DokuVaUpdateRequest struct {
-	Order              VaOrder                               `json:"order"`
+	Order              Order                                 `json:"order"`
 	VirtualAccountInfo DokuVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                           `json:"customer,omitempty"`
+	Customer           *Customer                             `json:"customer,omitempty"`
 }
 
 // DokuGeneratePaymentCode calls POST /doku-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) DokuGeneratePaymentCode(ctx context.Context, body DokuVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) DokuGeneratePaymentCode(ctx context.Context, body DokuVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/doku-virtual-account/v2/payment-code", body)
 }
 
 // DokuUpdatePaymentCode calls PATCH /doku-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) DokuUpdatePaymentCode(ctx context.Context, body DokuVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) DokuUpdatePaymentCode(ctx context.Context, body DokuVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/doku-virtual-account/v2/payment-code", body)
 }
 
@@ -272,45 +279,45 @@ func (s *VirtualAccountNonSnapService) DokuUpdatePaymentCode(ctx context.Context
 // Permata VA — /permata-virtual-account/v2/payment-code
 // ---------------------------------------------------------------------------
 
-// VaRefInfo is a Permata-style reference info line printed on the statement.
-type VaRefInfo struct {
+// RefInfo is a Permata-style reference info line printed on the statement.
+type RefInfo struct {
 	RefName  string `json:"ref_name"`
 	RefValue string `json:"ref_value"`
 }
 
-// PermataVaGenerateRequest is the body for POST /permata-virtual-account/v2/payment-code.
 type PermataVaGenerateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	// Custom reference info printed on the Permata statement
-	RefInfo []VaRefInfo `json:"ref_info,omitempty"`
+	RefInfo []RefInfo `json:"ref_info,omitempty"`
 }
 
+// PermataVaGenerateRequest is the body for POST /permata-virtual-account/v2/payment-code.
 type PermataVaGenerateRequest struct {
-	Order              VaOrder                                    `json:"order"`
+	Order              Order                                      `json:"order"`
 	VirtualAccountInfo PermataVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                                `json:"customer,omitempty"`
+	Customer           *Customer                                  `json:"customer,omitempty"`
+}
+
+type PermataVaUpdateRequestVirtualAccountInfo struct {
+	InfoBase
+	VirtualAccountNumber string    `json:"virtual_account_number"`
+	RefInfo              []RefInfo `json:"ref_info,omitempty"`
 }
 
 // PermataVaUpdateRequest is the body for PATCH /permata-virtual-account/v2/payment-code.
-type PermataVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
-	VirtualAccountNumber string      `json:"virtual_account_number"`
-	RefInfo              []VaRefInfo `json:"ref_info,omitempty"`
-}
-
 type PermataVaUpdateRequest struct {
-	Order              VaOrder                                  `json:"order"`
+	Order              Order                                    `json:"order"`
 	VirtualAccountInfo PermataVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                              `json:"customer,omitempty"`
+	Customer           *Customer                                `json:"customer,omitempty"`
 }
 
 // PermataGeneratePaymentCode calls POST /permata-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) PermataGeneratePaymentCode(ctx context.Context, body PermataVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) PermataGeneratePaymentCode(ctx context.Context, body PermataVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/permata-virtual-account/v2/payment-code", body)
 }
 
 // PermataUpdatePaymentCode calls PATCH /permata-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) PermataUpdatePaymentCode(ctx context.Context, body PermataVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) PermataUpdatePaymentCode(ctx context.Context, body PermataVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/permata-virtual-account/v2/payment-code", body)
 }
 
@@ -318,38 +325,38 @@ func (s *VirtualAccountNonSnapService) PermataUpdatePaymentCode(ctx context.Cont
 // CIMB VA — /cimb-virtual-account/v2/payment-code
 // ---------------------------------------------------------------------------
 
-// CimbVaGenerateRequest is the body for POST /cimb-virtual-account/v2/payment-code.
 type CimbVaGenerateRequestVirtualAccountInfo struct {
-	VaInfoBase
-	RefInfo []VaRefInfo `json:"ref_info,omitempty"`
+	InfoBase
+	RefInfo []RefInfo `json:"ref_info,omitempty"`
 }
 
+// CimbVaGenerateRequest is the body for POST /cimb-virtual-account/v2/payment-code.
 type CimbVaGenerateRequest struct {
-	Order              VaOrder                                 `json:"order"`
+	Order              Order                                   `json:"order"`
 	VirtualAccountInfo CimbVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                             `json:"customer,omitempty"`
+	Customer           *Customer                               `json:"customer,omitempty"`
+}
+
+type CimbVaUpdateRequestVirtualAccountInfo struct {
+	InfoBase
+	VirtualAccountNumber string    `json:"virtual_account_number"`
+	RefInfo              []RefInfo `json:"ref_info,omitempty"`
 }
 
 // CimbVaUpdateRequest is the body for PATCH /cimb-virtual-account/v2/payment-code.
-type CimbVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
-	VirtualAccountNumber string      `json:"virtual_account_number"`
-	RefInfo              []VaRefInfo `json:"ref_info,omitempty"`
-}
-
 type CimbVaUpdateRequest struct {
-	Order              VaOrder                               `json:"order"`
+	Order              Order                                 `json:"order"`
 	VirtualAccountInfo CimbVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                           `json:"customer,omitempty"`
+	Customer           *Customer                             `json:"customer,omitempty"`
 }
 
 // CimbGeneratePaymentCode calls POST /cimb-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) CimbGeneratePaymentCode(ctx context.Context, body CimbVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) CimbGeneratePaymentCode(ctx context.Context, body CimbVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/cimb-virtual-account/v2/payment-code", body)
 }
 
 // CimbUpdatePaymentCode calls PATCH /cimb-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) CimbUpdatePaymentCode(ctx context.Context, body CimbVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) CimbUpdatePaymentCode(ctx context.Context, body CimbVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/cimb-virtual-account/v2/payment-code", body)
 }
 
@@ -357,11 +364,8 @@ func (s *VirtualAccountNonSnapService) CimbUpdatePaymentCode(ctx context.Context
 // BNI VA — /bni-virtual-account/v2/payment-code
 // ---------------------------------------------------------------------------
 
-// BniVaGenerateRequest is the body for POST /bni-virtual-account/v2/payment-code.
-//
-// NOTE: DOKU's API literally expects the misspelled key `biling_type`.
 type BniVaGenerateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	// BNI billing type, e.g. "FIXED". NOTE: literally expects the misspelled `biling_type`.
 	BilingType *string `json:"biling_type,omitempty"`
 	// Product detail printed on the BNI statement
@@ -370,15 +374,17 @@ type BniVaGenerateRequestVirtualAccountInfo struct {
 	MerchantUniqueReference *string `json:"merchant_unique_reference,omitempty"`
 }
 
+// BniVaGenerateRequest is the body for POST /bni-virtual-account/v2/payment-code.
+//
+// NOTE: DOKU's API literally expects the misspelled key `biling_type`.
 type BniVaGenerateRequest struct {
-	Order              VaOrder                                `json:"order"`
+	Order              Order                                  `json:"order"`
 	VirtualAccountInfo BniVaGenerateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                            `json:"customer,omitempty"`
+	Customer           *Customer                              `json:"customer,omitempty"`
 }
 
-// BniVaUpdateRequest is the body for PATCH /bni-virtual-account/v2/payment-code.
 type BniVaUpdateRequestVirtualAccountInfo struct {
-	VaInfoBase
+	InfoBase
 	VirtualAccountNumber string `json:"virtual_account_number"`
 	// NOTE: literally expects the misspelled `biling_type`
 	BilingType              *string `json:"biling_type,omitempty"`
@@ -386,18 +392,19 @@ type BniVaUpdateRequestVirtualAccountInfo struct {
 	MerchantUniqueReference *string `json:"merchant_unique_reference,omitempty"`
 }
 
+// BniVaUpdateRequest is the body for PATCH /bni-virtual-account/v2/payment-code.
 type BniVaUpdateRequest struct {
-	Order              VaOrder                              `json:"order"`
+	Order              Order                                `json:"order"`
 	VirtualAccountInfo BniVaUpdateRequestVirtualAccountInfo `json:"virtual_account_info"`
-	Customer           *VaCustomer                          `json:"customer,omitempty"`
+	Customer           *Customer                            `json:"customer,omitempty"`
 }
 
 // BniGeneratePaymentCode calls POST /bni-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) BniGeneratePaymentCode(ctx context.Context, body BniVaGenerateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) BniGeneratePaymentCode(ctx context.Context, body BniVaGenerateRequest) (*PaymentCodeResponse, error) {
 	return s.generate(ctx, "/bni-virtual-account/v2/payment-code", body)
 }
 
 // BniUpdatePaymentCode calls PATCH /bni-virtual-account/v2/payment-code.
-func (s *VirtualAccountNonSnapService) BniUpdatePaymentCode(ctx context.Context, body BniVaUpdateRequest) (*VaPaymentCodeResponse, error) {
+func (s *NonSnap) BniUpdatePaymentCode(ctx context.Context, body BniVaUpdateRequest) (*PaymentCodeResponse, error) {
 	return s.update(ctx, "/bni-virtual-account/v2/payment-code", body)
 }

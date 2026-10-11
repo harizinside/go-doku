@@ -1,15 +1,21 @@
-package doku
+// Package emoney is the DOKU E-Money API: legacy OVO push payment, SNAP
+// debit host-to-host (DANA / ShopeePay / OVO) and ShopeePay orders.
+package emoney
 
 import (
 	"context"
 	"encoding/json"
+	doku "github.com/harizinside/go-doku"
 	"strconv"
 )
 
-// EmoneyService exposes the E-Money endpoints that don't fit the generic
+// Service exposes the E-Money endpoints that don't fit the generic
 // codegen shape: Legacy OVO Push Payment (check_sum), generic SNAP debit
 // host-to-host (DANA / ShopeePay / OVO SNAP e-money), ShopeePay order.
-type EmoneyService struct{ c *Client }
+type Service struct{ c *doku.Client }
+
+// New returns the service bound to c.
+func New(c *doku.Client) *Service { return &Service{c: c} }
 
 // ---------------------------------------------------------------------------
 // Legacy OVO Push Payment (check_sum based)
@@ -34,20 +40,20 @@ type OVOVoidRequest struct {
 	ApprovalCode    any `json:"approval_code"`
 }
 
-func (s *EmoneyService) ovoBody(input OVOPaymentRequest, paymentFields map[string]any) map[string]any {
-	checkSum := OVOCheckSum(OvoCheckSumInput{
+func (s *Service) ovoBody(input OVOPaymentRequest, paymentFields map[string]any) map[string]any {
+	checkSum := doku.OVOCheckSum(doku.OvoCheckSumInput{
 		Amount:          anyToString(input.Amount),
-		ClientID:        s.c.cfg.ClientID,
+		ClientID:        s.c.ClientID(),
 		InvoiceNumber:   input.InvoiceNumber,
 		OvoID:           input.OvoID,
-		SecretKey:       s.c.cfg.SecretKey,
+		SecretKey:       s.c.SecretKey(),
 		ApprovalCode:    stringFromAny(paymentFields["approval_code"]),
 		BatchNumber:     stringFromAny(paymentFields["batch_number"]),
 		ReferenceNumber: stringFromAny(paymentFields["reference_number"]),
 		TraceNumber:     stringFromAny(paymentFields["trace_number"]),
 	})
 	body := map[string]any{
-		"client": map[string]any{"id": s.c.cfg.ClientID},
+		"client": map[string]any{"id": s.c.ClientID()},
 		"order": map[string]any{
 			"invoice_number": input.InvoiceNumber,
 			"amount":         input.Amount,
@@ -93,14 +99,14 @@ func stringFromAny(v any) string {
 }
 
 // OVOPayment calls POST /ovo-emoney/v1/payment.
-func (s *EmoneyService) OVOPayment(ctx context.Context, input OVOPaymentRequest) (json.RawMessage, error) {
+func (s *Service) OVOPayment(ctx context.Context, input OVOPaymentRequest) (json.RawMessage, error) {
 	var out json.RawMessage
 	err := s.c.RequestNonSnap(ctx, "POST", "/ovo-emoney/v1/payment", s.ovoBody(input, nil), &out, "")
 	return out, err
 }
 
 // OVOVoid calls POST /ovo-emoney/v1/cancel.
-func (s *EmoneyService) OVOVoid(ctx context.Context, input OVOVoidRequest) (json.RawMessage, error) {
+func (s *Service) OVOVoid(ctx context.Context, input OVOVoidRequest) (json.RawMessage, error) {
 	fields := map[string]any{
 		"batch_number":     input.BatchNumber,
 		"trace_number":     input.TraceNumber,
@@ -116,8 +122,6 @@ func (s *EmoneyService) OVOVoid(ctx context.Context, input OVOVoidRequest) (json
 // Generic SNAP debit payment host-to-host (DANA / ShopeePay / OVO SNAP e-money)
 // ---------------------------------------------------------------------------
 
-// DebitPaymentHostToHostRequest is the body for the SNAP debit h2h e-money
-// payment.
 type DebitPaymentHostToHostRequestURLParam struct {
 	URL *string `json:"url,omitempty"`
 	// e.g. PAY_RETURN
@@ -138,6 +142,8 @@ type DebitPaymentHostToHostRequestAdditionalInfo struct {
 	SupportDeepLinkCheckoutURL *string `json:"supportDeepLinkCheckoutUrl,omitempty"`
 }
 
+// DebitPaymentHostToHostRequest is the body for the SNAP debit h2h e-money
+// payment.
 type DebitPaymentHostToHostRequest struct {
 	// Merchant invoice / reference number
 	PartnerReferenceNo string `json:"partnerReferenceNo"`
@@ -152,13 +158,9 @@ type DebitPaymentHostToHostRequest struct {
 
 // DebitPaymentHostToHost calls POST /direct-debit/core/v1/debit/payment-host-to-host
 // (signed with secretKey, per DOKU's E-Money h2h reference script).
-func (s *EmoneyService) DebitPaymentHostToHost(ctx context.Context, body DebitPaymentHostToHostRequest) (json.RawMessage, error) {
-	bodyJSON, err := jsonFromStruct(body)
-	if err != nil {
-		return nil, err
-	}
+func (s *Service) DebitPaymentHostToHost(ctx context.Context, body DebitPaymentHostToHostRequest) (json.RawMessage, error) {
 	var out json.RawMessage
-	if err := s.c.RequestSnap(ctx, "POST", "/direct-debit/core/v1/debit/payment-host-to-host", SnapOptions{Body: bodyJSON}, &out); err != nil {
+	if err := s.c.RequestSnap(ctx, "POST", "/direct-debit/core/v1/debit/payment-host-to-host", doku.SnapOptions{Body: body}, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -168,18 +170,18 @@ func (s *EmoneyService) DebitPaymentHostToHost(ctx context.Context, body DebitPa
 // ShopeePay (Non-SNAP)
 // ---------------------------------------------------------------------------
 
-// ShopeePayCreateOrderRequest is the body for POST /shopeepay-emoney/v2/order.
 type ShopeePayCreateOrderRequestOrder struct {
 	InvoiceNumber string  `json:"invoice_number"`
 	Amount        float64 `json:"amount"`
 }
 
+// ShopeePayCreateOrderRequest is the body for POST /shopeepay-emoney/v2/order.
 type ShopeePayCreateOrderRequest struct {
 	Order ShopeePayCreateOrderRequestOrder `json:"order"`
 }
 
 // ShopeePayCreateOrder calls POST /shopeepay-emoney/v2/order.
-func (s *EmoneyService) ShopeePayCreateOrder(ctx context.Context, body ShopeePayCreateOrderRequest) (json.RawMessage, error) {
+func (s *Service) ShopeePayCreateOrder(ctx context.Context, body ShopeePayCreateOrderRequest) (json.RawMessage, error) {
 	var out json.RawMessage
 	if err := s.c.RequestNonSnap(ctx, "POST", "/shopeepay-emoney/v2/order", body, &out, ""); err != nil {
 		return nil, err
@@ -194,18 +196,4 @@ func formatFloat(f float64) string {
 		return strconv.FormatInt(int64(f), 10)
 	}
 	return strconv.FormatFloat(f, 'f', -1, 64)
-}
-
-// jsonFromStruct marshals an arbitrary struct via the standard json package
-// so the caller can re-send it through RequestSnap.
-func jsonFromStruct(v any) (any, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var out any
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }

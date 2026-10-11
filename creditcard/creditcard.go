@@ -1,33 +1,38 @@
-package doku
+// Package creditcard is the DOKU Credit Card API (payment page and refund).
+package creditcard
 
 import (
 	"context"
 	"encoding/json"
+	doku "github.com/harizinside/go-doku"
 )
 
-// CreditCardService exposes the Non-SNAP Credit Card endpoints (Payment
+// Service exposes the Non-SNAP Credit Card endpoints (Payment
 // Page + Refund). Hand-typed from developers.doku.com.
-type CreditCardService struct{ c *Client }
+type Service struct{ c *doku.Client }
 
-// CreditCardPaymentPageRequest is the body for POST /credit-card/v1/payment-page.
-type CreditCardPaymentPageRequest struct {
-	Order    CreditCardOrder     `json:"order"`
-	Customer *CreditCardCustomer `json:"customer,omitempty"`
+// New returns the service bound to c.
+func New(c *doku.Client) *Service { return &Service{c: c} }
+
+// PaymentPageRequest is the body for POST /credit-card/v1/payment-page.
+type PaymentPageRequest struct {
+	Order    Order     `json:"order"`
+	Customer *Customer `json:"customer,omitempty"`
 	// Conditional: for AUTHORIZE / INSTALLMENT flows
-	Payment *CreditCardPaymentDetails `json:"payment,omitempty"`
+	Payment *PaymentDetails `json:"payment,omitempty"`
 	// Card tokenization (pre-fill / force save)
-	Card                  *CreditCardTokenization   `json:"card,omitempty"`
-	OverrideConfiguration *CreditCardOverrideConfig `json:"override_configuration,omitempty"`
-	AdditionalInfo        *CreditCardAdditionalInfo `json:"additional_info,omitempty"`
+	Card                  *Tokenization   `json:"card,omitempty"`
+	OverrideConfiguration *OverrideConfig `json:"override_configuration,omitempty"`
+	AdditionalInfo        *AdditionalInfo `json:"additional_info,omitempty"`
 }
 
-// CreditCardOrder is the order block.
-type CreditCardOrder struct {
+// Order is the order block.
+type Order struct {
 	// In IDR and without decimal
 	Amount float64 `json:"amount"`
 	// Max length: 64 (30 for Mandiri acquirer)
-	InvoiceNumber string               `json:"invoice_number"`
-	LineItems     []CreditCardLineItem `json:"line_items,omitempty"`
+	InvoiceNumber string     `json:"invoice_number"`
+	LineItems     []LineItem `json:"line_items,omitempty"`
 	// Conditional: mandatory when `auto_redirect` is true
 	CallbackURL *string `json:"callback_url,omitempty"`
 	// Redirect target on failure; defaults to callback_url
@@ -39,15 +44,15 @@ type CreditCardOrder struct {
 	SessionID  *string `json:"session_id,omitempty"`
 }
 
-// CreditCardLineItem is one line item.
-type CreditCardLineItem struct {
+// LineItem is one line item.
+type LineItem struct {
 	Name     *string  `json:"name,omitempty"`
 	Price    *float64 `json:"price,omitempty"`
 	Quantity *float64 `json:"quantity,omitempty"`
 }
 
-// CreditCardCustomer is the customer block.
-type CreditCardCustomer struct {
+// Customer is the customer block.
+type Customer struct {
 	// Conditional: mandatory for tokenization
 	ID   *string `json:"id,omitempty"`
 	Name *string `json:"name,omitempty"`
@@ -60,8 +65,8 @@ type CreditCardCustomer struct {
 	City    *string `json:"city,omitempty"`
 }
 
-// CreditCardPaymentDetails is the payment-type block.
-type CreditCardPaymentDetails struct {
+// PaymentDetails is the payment-type block.
+type PaymentDetails struct {
 	// Conditional: mandatory if you support multiple card transaction types
 	Type *string `json:"type,omitempty"` // SALE | AUTHORIZE | INSTALLMENT
 	// true: capture immediately after AUTHORIZE (behaves like SALE)
@@ -72,26 +77,26 @@ type CreditCardPaymentDetails struct {
 	Tenor *float64 `json:"tenor,omitempty"`
 }
 
-// CreditCardTokenization is the card block.
-type CreditCardTokenization struct {
+// Tokenization is the card block.
+type Tokenization struct {
 	// Pre-fills the card number field
 	Token *string `json:"token,omitempty"`
 	// Force the customer to save the card token for the next payment
 	Save *bool `json:"save,omitempty"`
 }
 
-// CreditCardOverrideConfig is the override_configuration block.
-type CreditCardOverrideConfig struct {
-	Themes *CreditCardThemes `json:"themes,omitempty"`
-	Promo  []CreditCardPromo `json:"promo,omitempty"`
+// OverrideConfig is the override_configuration block.
+type OverrideConfig struct {
+	Themes *Themes `json:"themes,omitempty"`
+	Promo  []Promo `json:"promo,omitempty"`
 	// Only accept these BINs (6 or 8 digits)
 	AllowBin []float64 `json:"allow_bin,omitempty"`
 	// Only accept these installment tenors
 	AllowTenor []float64 `json:"allow_tenor,omitempty"`
 }
 
-// CreditCardThemes is the theme override block.
-type CreditCardThemes struct {
+// Themes is the theme override block.
+type Themes struct {
 	// EN (default) | ID
 	Language              *string `json:"language,omitempty"`
 	BackgroundColor       *string `json:"background_color,omitempty"`
@@ -100,88 +105,87 @@ type CreditCardThemes struct {
 	ButtonFontColor       *string `json:"button_font_color,omitempty"`
 }
 
-// CreditCardPromo is one promo entry.
-type CreditCardPromo struct {
+// Promo is one promo entry.
+type Promo struct {
 	// BIN that gets the promo (6 or 8 digits)
 	Bin *string `json:"bin,omitempty"`
 	// final amount = order.amount - discount_amount
 	DiscountAmount *float64 `json:"discount_amount,omitempty"`
 }
 
-// CreditCardAdditionalInfo is the additional_info block.
-type CreditCardAdditionalInfoDisclaimer struct {
+type AdditionalInfoDisclaimer struct {
 	ID json.RawMessage `json:"id,omitempty"`
 	EN json.RawMessage `json:"en,omitempty"`
 }
 
-type CreditCardAdditionalInfo struct {
-	OverrideNotificationURL *string                             `json:"override_notification_url,omitempty"`
-	Disclaimer              *CreditCardAdditionalInfoDisclaimer `json:"disclaimer,omitempty"`
+// AdditionalInfo is the additional_info block.
+type AdditionalInfo struct {
+	OverrideNotificationURL *string                   `json:"override_notification_url,omitempty"`
+	Disclaimer              *AdditionalInfoDisclaimer `json:"disclaimer,omitempty"`
 }
 
-// CreditCardPaymentPageResponse is the response from the payment-page endpoint.
-type CreditCardPaymentPageResponseOrder struct {
+type PaymentPageResponseOrder struct {
 	InvoiceNumber *string           `json:"invoice_number,omitempty"`
 	LineItems     []json.RawMessage `json:"line_items,omitempty"`
 }
 
-type CreditCardPaymentPageResponseCreditCardPaymentPage struct {
+type PaymentPageResponseCreditCardPaymentPage struct {
 	// Card payment page URL to show the customer
 	URL *string `json:"url,omitempty"`
 }
 
-type CreditCardPaymentPageResponseCreditCardJS struct {
+type PaymentPageResponseCreditCardJS struct {
 	SessionID        *string           `json:"session_id,omitempty"`
 	PaymentPlanCodes []json.RawMessage `json:"payment_plan_codes,omitempty"`
 }
 
-type CreditCardPaymentPageResponse struct {
-	Order                 *CreditCardPaymentPageResponseOrder                 `json:"order,omitempty"`
-	CreditCardPaymentPage *CreditCardPaymentPageResponseCreditCardPaymentPage `json:"credit_card_payment_page,omitempty"`
-	CreditCardJS          *CreditCardPaymentPageResponseCreditCardJS          `json:"credit_card_js,omitempty"`
+// PaymentPageResponse is the response from the payment-page endpoint.
+type PaymentPageResponse struct {
+	Order                 *PaymentPageResponseOrder                 `json:"order,omitempty"`
+	CreditCardPaymentPage *PaymentPageResponseCreditCardPaymentPage `json:"credit_card_payment_page,omitempty"`
+	CreditCardJS          *PaymentPageResponseCreditCardJS          `json:"credit_card_js,omitempty"`
 }
 
 // GenerateCreditCardPaymentPage calls POST /credit-card/v1/payment-page.
-func (s *CreditCardService) GenerateCreditCardPaymentPage(ctx context.Context, body CreditCardPaymentPageRequest) (*CreditCardPaymentPageResponse, error) {
-	var out CreditCardPaymentPageResponse
+func (s *Service) GenerateCreditCardPaymentPage(ctx context.Context, body PaymentPageRequest) (*PaymentPageResponse, error) {
+	var out PaymentPageResponse
 	if err := s.c.RequestNonSnap(ctx, "POST", "/credit-card/v1/payment-page", body, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CreditCardRefundRequest is the body for the refund endpoint.
-type CreditCardRefundRequestOrder struct {
+type RefundRequestOrder struct {
 	// Invoice number of the transaction being refunded
 	InvoiceNumber string `json:"invoice_number"`
 }
 
-type CreditCardRefundRequestPayment struct {
+type RefundRequestPayment struct {
 	// Request ID from the payment initiation (or Capture) of the original transaction
 	OriginalRequestID string `json:"original_request_id"`
 }
 
-type CreditCardRefundRequestRefund struct {
+type RefundRequestRefund struct {
 	// Amount to refund; partial refunds allowed until the original amount is reached
 	Amount float64 `json:"amount"`
 }
 
-type CreditCardRefundRequest struct {
-	Order   CreditCardRefundRequestOrder   `json:"order"`
-	Payment CreditCardRefundRequestPayment `json:"payment"`
-	Refund  CreditCardRefundRequestRefund  `json:"refund"`
+// RefundRequest is the body for the refund endpoint.
+type RefundRequest struct {
+	Order   RefundRequestOrder   `json:"order"`
+	Payment RefundRequestPayment `json:"payment"`
+	Refund  RefundRequestRefund  `json:"refund"`
 }
 
-// CreditCardRefundResponse is the response from the refund endpoint.
-type CreditCardRefundResponseOrder struct {
+type RefundResponseOrder struct {
 	InvoiceNumber *string `json:"invoice_number,omitempty"`
 }
 
-type CreditCardRefundResponsePayment struct {
+type RefundResponsePayment struct {
 	OriginalRequestID *string `json:"original_request_id,omitempty"`
 }
 
-type CreditCardRefundResponseRefund struct {
+type RefundResponseRefund struct {
 	Amount       *float64 `json:"amount,omitempty"`
 	Reason       *string  `json:"reason,omitempty"`
 	Type         *string  `json:"type,omitempty"`   // VOID | PARTIAL_REFUND | FULL_REFUND | MANUAL_PARTIAL_REFUND | MANUAL_FULL_REFUND
@@ -190,17 +194,18 @@ type CreditCardRefundResponseRefund struct {
 	ApprovalCode *string  `json:"approval_code,omitempty"`
 }
 
-type CreditCardRefundResponseError struct {
+type RefundResponseError struct {
 	Code    *string `json:"code,omitempty"`
 	Message *string `json:"message,omitempty"`
 	Type    *string `json:"type,omitempty"`
 }
 
-type CreditCardRefundResponse struct {
-	Order   *CreditCardRefundResponseOrder   `json:"order,omitempty"`
-	Payment *CreditCardRefundResponsePayment `json:"payment,omitempty"`
-	Refund  *CreditCardRefundResponseRefund  `json:"refund,omitempty"`
-	Error   *CreditCardRefundResponseError   `json:"error,omitempty"`
+// RefundResponse is the response from the refund endpoint.
+type RefundResponse struct {
+	Order   *RefundResponseOrder   `json:"order,omitempty"`
+	Payment *RefundResponsePayment `json:"payment,omitempty"`
+	Refund  *RefundResponseRefund  `json:"refund,omitempty"`
+	Error   *RefundResponseError   `json:"error,omitempty"`
 }
 
 // RefundCreditCard calls POST /credit-card/v1/cancellation/credit-card/refund.
@@ -208,8 +213,8 @@ type CreditCardRefundResponse struct {
 // NOTE: docs.doku.com currently documents `/cancellation/credit-card/refund` (no
 // /credit-card/v1 prefix) while the DOKU Postman collection uses
 // `/credit-card/v1/cancellation/credit-card/refund`; this SDK follows the collection.
-func (s *CreditCardService) RefundCreditCard(ctx context.Context, body CreditCardRefundRequest) (*CreditCardRefundResponse, error) {
-	var out CreditCardRefundResponse
+func (s *Service) RefundCreditCard(ctx context.Context, body RefundRequest) (*RefundResponse, error) {
+	var out RefundResponse
 	if err := s.c.RequestNonSnap(ctx, "POST", "/credit-card/v1/cancellation/credit-card/refund", body, &out, ""); err != nil {
 		return nil, err
 	}
