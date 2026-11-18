@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -188,6 +189,9 @@ func TestAPIError(t *testing.T) {
 	}
 	if apiErr.Header.Get("Content-Type") == "" {
 		t.Errorf("Header not captured")
+	}
+	if !strings.Contains(err.Error(), "amount too low") {
+		t.Errorf("Error() = %q, want it to contain %q", err.Error(), "amount too low")
 	}
 }
 

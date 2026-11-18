@@ -13,7 +13,7 @@ Custom Settlement Report).
 ## Install
 
 ```sh
-go get github.com/harizinside/go-doku@v0.2.0
+go get github.com/harizinside/go-doku@v0.3.0
 ```
 
 Pin a release tag so `go get` never picks up untested WIP from `main`.
@@ -136,6 +136,32 @@ B2B tokens are cached in-memory (mutex-guarded) until shortly before expiry;
 B2B2C tokens are cached per `authCode`. Direct Debit SNAP flows that need a
 customer token take a `*SnapOptions{CustomerToken: …}` argument — fetch one
 with `client.SnapB2B2CToken(ctx, authCode)`.
+
+## Request-Id
+
+Every Non-SNAP request carries a `Request-Id` header, and that id is part of
+the signature. By default a random UUIDv4 is generated per request. To make a
+request reproducible — an idempotency key, an order number — pass
+`doku.WithRequestID`:
+
+```go
+page, err := checkout.New(client).InitiateCheckoutPayment(ctx, checkout.Request{
+    Order:   checkout.RequestOrder{Amount: 20000, InvoiceNumber: "INV-0001"},
+    Payment: checkout.RequestPayment{PaymentDueDate: doku.Ptr(60.0)},
+}, doku.WithRequestID("order-NMW-261118-0040"))
+```
+
+The id is used verbatim for both the `Request-Id` header and the signature, so
+it must be non-empty and at most 128 bytes; anything else fails before the
+request is encoded or sent. `misc.New(client).CheckOrderStatus(ctx, invoice,
+doku.WithRequestID(id))` takes the same option.
+
+## Errors
+
+Any non-2xx DOKU response is returned as `*doku.APIError`: `Status`, `Body`
+(the raw JSON), `Header` and `Message`. The message ends with the first 500
+bytes of the response body, so DOKU's own reason is visible in `err.Error()`
+and not only in `apiErr.Body`.
 
 ## Finance & Settlement
 

@@ -18,14 +18,16 @@ func New(c *doku.Client) *Service { return &Service{c: c} }
 
 // CheckOrderStatus calls GET /orders/v1/status/{invoiceNumber}.
 // DOKU's docs recommend hitting it at least 60 seconds after payment
-// completion. GET requests are signed without a Digest line.
-func (s *Service) CheckOrderStatus(ctx context.Context, invoiceNumber string) (json.RawMessage, error) {
+// completion. GET requests are signed without a Digest line. Optional request
+// options (e.g. doku.WithRequestID) customize the underlying Non-SNAP
+// request.
+func (s *Service) CheckOrderStatus(ctx context.Context, invoiceNumber string, opts ...doku.RequestOption) (json.RawMessage, error) {
 	if invoiceNumber == "" {
 		return nil, errEmptyInvoiceNumber
 	}
 	path := "/orders/v1/status/" + url.PathEscape(invoiceNumber)
 	var out json.RawMessage
-	if err := s.c.RequestNonSnap(ctx, "GET", path, nil, &out, ""); err != nil {
+	if err := s.c.RequestNonSnap(ctx, "GET", path, nil, &out, "", opts...); err != nil {
 		return nil, err
 	}
 	return out, nil

@@ -214,10 +214,11 @@ type ResponsePayment struct {
 }
 
 // InitiateCheckoutPayment initiates a DOKU Checkout payment and returns the
-// Checkout page URL.
-func (s *Service) InitiateCheckoutPayment(ctx context.Context, body Request) (*Response, error) {
+// Checkout page URL. Optional request options (e.g. doku.WithRequestID)
+// customize the underlying Non-SNAP request.
+func (s *Service) InitiateCheckoutPayment(ctx context.Context, body Request, opts ...doku.RequestOption) (*Response, error) {
 	var out Response
-	if err := s.c.RequestNonSnap(ctx, "POST", "/checkout/v1/payment", body, &out, ""); err != nil {
+	if err := s.c.RequestNonSnap(ctx, "POST", "/checkout/v1/payment", body, &out, "", opts...); err != nil {
 		return nil, err
 	}
 	return &out, nil

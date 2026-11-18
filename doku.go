@@ -15,6 +15,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,14 +240,35 @@ func (c *Client) sendHTTP(ctx context.Context, method, url string, headers map[s
 	}
 	respBody := jsonOrText(raw)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := fmt.Sprintf("DOKU API error %d for %s %s", resp.StatusCode, method, url)
+		if snippet := bodySnippet(raw); snippet != "" {
+			msg += ": " + snippet
+		}
 		return nil, resp.Header, &APIError{
 			Status:  resp.StatusCode,
 			Body:    respBody,
 			Header:  resp.Header,
-			Message: fmt.Sprintf("DOKU API error %d for %s %s", resp.StatusCode, method, url),
+			Message: msg,
 		}
 	}
 	return respBody, resp.Header, nil
+}
+
+// maxErrorBodySnippet is the number of raw response bytes appended to an
+// APIError message, so DOKU's own reason shows up in err.Error() and not
+// only in APIError.Body.
+const maxErrorBodySnippet = 500
+
+// bodySnippet returns the first maxErrorBodySnippet bytes of raw, or the
+// empty string when there is no body.
+func bodySnippet(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	if len(raw) > maxErrorBodySnippet {
+		raw = raw[:maxErrorBodySnippet]
+	}
+	return string(raw)
 }
 
 // jsonOrText returns a json.RawMessage if raw parses as JSON, otherwise wraps
@@ -268,19 +290,61 @@ func jsonOrText(raw []byte) json.RawMessage {
 	return encoded
 }
 
+// maxRequestIDLength is the maximum length (in bytes) of a caller-supplied
+// Request-Id.
+const maxRequestIDLength = 128
+
+// requestOptions holds the per-request overrides applied by RequestOption.
+type requestOptions struct {
+	requestID    string
+	requestIDSet bool
+}
+
+// RequestOption customizes a Non-SNAP request.
+type RequestOption func(*requestOptions)
+
+// WithRequestID sets a deterministic Request-Id instead of a random UUIDv4.
+// The id is used verbatim for both the Request-Id header and the Non-SNAP
+// signature, so the request stays reproducible and idempotent. It must be
+// non-empty and at most 128 bytes long; otherwise the request fails before
+// anything is encoded or sent.
+func WithRequestID(id string) RequestOption {
+	return func(o *requestOptions) {
+		o.requestID = id
+		o.requestIDSet = true
+	}
+}
+
 // RequestNonSnap makes a Non-SNAP signed request. The body bytes that are
 // signed are the same bytes that are sent over the wire.
-func (c *Client) RequestNonSnap(ctx context.Context, method, targetPath string, body, out any, baseOverride string) error {
+func (c *Client) RequestNonSnap(ctx context.Context, method, targetPath string, body, out any, baseOverride string, opts ...RequestOption) error {
 	if !strings.HasPrefix(targetPath, "/") {
 		return fmt.Errorf("doku: targetPath must start with /, got %q", targetPath)
+	}
+	var ro requestOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&ro)
+		}
+	}
+	requestID := ro.requestID
+	if ro.requestIDSet {
+		if requestID == "" {
+			return errors.New("doku: request id must not be empty")
+		}
+		if len(requestID) > maxRequestIDLength {
+			return fmt.Errorf("doku: request id must be at most %d bytes, got %d", maxRequestIDLength, len(requestID))
+		}
+	} else {
+		var err error
+		requestID, err = randomUUID()
+		if err != nil {
+			return &APIError{Status: 0, Message: "generate request id", cause: err}
+		}
 	}
 	rawBody, err := encodeBody(body)
 	if err != nil {
 		return err
-	}
-	requestID, err := randomUUID()
-	if err != nil {
-		return &APIError{Status: 0, Message: "generate request id", cause: err}
 	}
 	requestTimestamp := NonSnapTimestamp()
 	signature := SignNonSnap(NonSnapSignatureInput{
