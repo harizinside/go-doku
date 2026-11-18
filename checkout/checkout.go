@@ -199,7 +199,8 @@ type ResponseOrder struct {
 	DisableRetryPayment  *bool           `json:"disable_retry_payment,omitempty"`
 	RecoverAbandonedCart *bool           `json:"recover_abandoned_cart,omitempty"`
 	ExpiredRecoveredCart *float64        `json:"expired_recovered_cart,omitempty"`
-	LineItems            []LineItem      `json:"line_items,omitempty"`
+	// Raw: DOKU echoes numeric fields (e.g. price) as strings
+	LineItems []json.RawMessage `json:"line_items,omitempty"`
 }
 
 // ResponsePayment echoes the payment block.

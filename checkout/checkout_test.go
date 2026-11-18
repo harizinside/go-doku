@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -101,5 +102,17 @@ func TestInitiateCheckoutPaymentInvalidRequestID(t *testing.T) {
 				t.Errorf("server hits = %d, want 0", hits)
 			}
 		})
+	}
+}
+
+// DOKU echoes line_items[].price as a JSON string; decoding must not fail.
+func TestResponseDecodesStringLineItemPrice(t *testing.T) {
+	raw := `{"response":{"order":{"amount":"217159","line_items":[{"name":"x","price":"217159","quantity":1}]}}}`
+	var out Response
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := string(out.Response.Order.LineItems[0]); !strings.Contains(got, `"217159"`) {
+		t.Fatalf("line item not preserved: %s", got)
 	}
 }
