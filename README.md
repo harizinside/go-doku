@@ -13,7 +13,7 @@ Custom Settlement Report).
 ## Install
 
 ```sh
-go get github.com/harizinside/go-doku@v0.3.0
+go get github.com/harizinside/go-doku@v0.3.1
 ```
 
 Pin a release tag so `go get` never picks up untested WIP from `main`.
@@ -152,9 +152,10 @@ page, err := checkout.New(client).InitiateCheckoutPayment(ctx, checkout.Request{
 ```
 
 The id is used verbatim for both the `Request-Id` header and the signature, so
-it must be non-empty and at most 128 bytes; anything else fails before the
-request is encoded or sent. `misc.New(client).CheckOrderStatus(ctx, invoice,
-doku.WithRequestID(id))` takes the same option.
+it must be non-empty, at most 128 bytes, and visible ASCII only (no spaces or
+control characters); anything else fails before the request is encoded or sent.
+`misc.New(client).CheckOrderStatus(ctx, invoice, doku.WithRequestID(id))` takes
+the same option.
 
 ## Errors
 

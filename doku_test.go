@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -298,5 +299,17 @@ func TestSnapTokenStringExpiresIn(t *testing.T) {
 	}
 	if ttl := time.Until(c.b2bToken.expiresAt); ttl > 31*time.Second || ttl < 25*time.Second {
 		t.Errorf("token TTL=%v, want ~30s (60s - 30s margin)", ttl)
+	}
+}
+
+// bodySnippet must not split a multibyte character at the 500-byte cut.
+func TestBodySnippetRuneBoundary(t *testing.T) {
+	raw := []byte(strings.Repeat("a", maxErrorBodySnippet-1) + "é")
+	got := bodySnippet(raw)
+	if !utf8.ValidString(got) {
+		t.Fatalf("snippet is not valid UTF-8")
+	}
+	if len(got) != maxErrorBodySnippet-1 {
+		t.Errorf("len = %d, want %d", len(got), maxErrorBodySnippet-1)
 	}
 }

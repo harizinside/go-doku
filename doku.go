@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Env selects the DOKU host. Sandbox is the default.
@@ -266,7 +267,12 @@ func bodySnippet(raw []byte) string {
 		return ""
 	}
 	if len(raw) > maxErrorBodySnippet {
-		raw = raw[:maxErrorBodySnippet]
+		// Back up to a rune boundary so a multibyte character isn't split.
+		n := maxErrorBodySnippet
+		for n > 0 && !utf8.RuneStart(raw[n]) {
+			n--
+		}
+		raw = raw[:n]
 	}
 	return string(raw)
 }
@@ -306,7 +312,8 @@ type RequestOption func(*requestOptions)
 // WithRequestID sets a deterministic Request-Id instead of a random UUIDv4.
 // The id is used verbatim for both the Request-Id header and the Non-SNAP
 // signature, so the request stays reproducible and idempotent. It must be
-// non-empty and at most 128 bytes long; otherwise the request fails before
+// non-empty, at most 128 bytes long and visible ASCII only (no spaces or
+// control characters); otherwise the request fails before
 // anything is encoded or sent.
 func WithRequestID(id string) RequestOption {
 	return func(o *requestOptions) {
@@ -334,6 +341,11 @@ func (c *Client) RequestNonSnap(ctx context.Context, method, targetPath string, 
 		}
 		if len(requestID) > maxRequestIDLength {
 			return fmt.Errorf("doku: request id must be at most %d bytes, got %d", maxRequestIDLength, len(requestID))
+		}
+		for i := 0; i < len(requestID); i++ {
+			if b := requestID[i]; b < 0x21 || b > 0x7e {
+				return fmt.Errorf("doku: request id must be visible ASCII, got byte 0x%02x at %d", b, i)
+			}
 		}
 	} else {
 		var err error

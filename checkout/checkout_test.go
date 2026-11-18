@@ -84,6 +84,9 @@ func TestInitiateCheckoutPaymentInvalidRequestID(t *testing.T) {
 	}{
 		{name: "empty", id: ""},
 		{name: "too long", id: strings.Repeat("a", 129)},
+		{name: "CRLF", id: "order-1\r\nX-Evil: 1"},
+		{name: "space", id: "order 1"},
+		{name: "non-ASCII", id: "order-é"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
